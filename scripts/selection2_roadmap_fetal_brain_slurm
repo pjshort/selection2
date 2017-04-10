@@ -1,0 +1,29 @@
+#!/bin/bash
+#SBATCH -J HARS_and_conserved_selection_test
+#SBATCH -A WGS10K
+#SBATCH -p sandybridge
+#SBATCH -N 1
+#SBATCH --exclusive
+#SBATCH -t 02:00:00
+#SBATCH --requeue
+#SBATCH --mail-type=FAIL --mail-type=REQUEUE
+
+# Load modules
+. /etc/profile.d/modules.sh
+module purge
+module load default-impi
+# cbrc modules are here:
+export MODULEPATH=/scratch/cbrcmod/modules/out/modulefiles:$MODULEPATH
+module load samtools/1.2 parallel
+
+#ulimit -Sn unlimited
+
+# get selection test scores for the HARS and conserved elements
+
+cd ~/software/selection2/R/
+~/software/R-3.3.2/builddir/bin/Rscript selection2.R \
+--vars ~/scratch/popgen/data/chr${SLURM_ARRAY_TASK_ID}_EUR.tsv \
+--elements ~/scratch/REP/DNase_hotspots/E081-DNase.hotspot.fdr0.01.broad.bed.gz \
+--null_model ~/scratch/popgen/synonymous/bridge_synonymous_lm.EUR.RData \
+--output ~/scratch/REP/selection_test/chr${SLURM_ARRAY_TASK_ID}_REP_E081_selection2.txt \
+--pop_size 5034
