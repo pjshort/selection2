@@ -19,7 +19,7 @@ option_list <- list(
   make_option("--elements", help = "Pass elements in which DNMs fall"),
   make_option("--null_model", default = "../data/ddd_synonymous_lm.RData"),
   make_option("--output", help = "location to save data frame with windows stats"),
-  make_option("--pop_size", default=8082, help="Size of the population (number of individuals). Used to calculate allele count cutoff for rare vars (<0.1%).")
+  make_option("--pop_size", help="Size of the population (number of individuals). Used to calculate allele count cutoff for rare vars (<0.1%).")
 )
 
 args <- parse_args(OptionParser(option_list=option_list))

@@ -1,0 +1,66 @@
+### dependencies
+library(optparse)
+library(plyr)
+library(stringr)
+source("./mutation_null_model.R")
+source("./annotation_tools.R")
+source("../dddMAPS/MAPS.R")
+
+### command line options
+option_list <- list(
+  make_option("--variants", help="File with observed variants in the population."),
+  make_option("--genes", help="List of regions to assign variants to correct element. Should match MACB_expected input."),
+  make_option("--gene_mutation_rates", help="Mutations rates calculated per gene"),
+  make_option("--model_out", help="Output file for linear model (saved as RData object)"),
+  make_option("--pop_size", help="Size of the population (number of individuals). Used to calculate allele count cutoff for rare vars (<0.1%)."),
+)
+
+args <- parse_args(OptionParser(option_list=option_list))
+
+print(args)
+
+variants = read.table(args$variants, header = TRUE, sep = "\t")
+variants = subset(variants, filter == "PASS")
+
+genes = read.table(args$genes, header = TRUE, sep = "\t")
+genes = subset(genes, stop - start > 1)
+
+if (any(!grepl("^chr", genes$chr))) {
+  genes$chr = paste0("chr", genes$chr)
+}
+
+if (!("seq" %in% colnames(genes))) {
+  genes$seq = as.character(getSeq(Hsapiens, genes$chr, genes$start, genes$stop))
+}
+
+gene_mutation_rates = read.table(args$gene_mutation_rates, header = TRUE, sep = "\t")
+
+# calculate the allele count cutoff for synonymous model
+rare_var_ac = args$pop_size*2*0.001  # multiply by two for no. of chroms and cutoff of 0.1%
+
+synonymous_coding = subset(variants, CQ == "synonymous_variant")
+synonymous_coding = filter_with_bed(synonymous_coding, genes)
+
+rare_synonymous_coding = subset(synonymous_coding, allele_count <= rare_var_ac)
+
+print(head(rare_synonymous_coding))
+
+# assign each synonymous DNM to a gene
+rare_synonymous_coding = get_gene(rare_synonymous_coding, genes)
+
+print(head(genes))
+
+print(head(rare_synonymous_coding))
+
+print("Assigning synonymous variants to genes...")
+
+# count the number of rare synonymous variants per region 
+gene_synonymous_counts = ddply(rare_synonymous_coding, .variables = c("gene"), .fun = function(df) data.frame(observed_rare_synonymous_count = sum(df$allele_count)))
+gene_synonymous_counts$p_snp_null = gene_mutation_rates$p_snp_synonymous[match(gene_synonymous_counts$gene, gene_mutation_rates$gene)]
+
+print("Fitting linear model to the synonymous counts as a function of mutation rate.")
+
+synonymous_lm = lm(observed_rare_synonymous_count ~ p_snp_null, gene_synonymous_counts)
+
+# fit linear model and save as RData object
+save(synonymous_lm, file = args$model_out)
