@@ -1,5 +1,34 @@
 library(GenomicRanges)
 
+get_gene <- function(de_novos, genes){
+  # assumes that the gene input has at least three columns with chr, start, end as the first three (all others ignored)
+  
+  if (any(!grepl("^chr", de_novos$chr))) {
+    de_novos$chr = paste0("chr", de_novos$chr)
+  }
+  if (any(!grepl("^chr", genes$chr))) {
+    genes$chr = paste0("chr", genes$chr)
+  }
+  
+  if ("end" %in% colnames(de_novos)){ # region instead of de novos - use the first position of the region to get closest gene!
+    dn = GRanges(seqnames=Rle(de_novos$chr), ranges = IRanges(start = de_novos$start, end = de_novos$start + 1))
+  } else {
+    dn = GRanges(seqnames=Rle(de_novos$chr), ranges = IRanges(start = de_novos$pos, end = de_novos$pos + 1))
+  }
+  
+  g = GRanges(seqnames=Rle(genes$chr), ranges = IRanges(start = genes$start, end = genes$stop))
+  
+  # find overlap between denovos and annotated genes
+  hits = findOverlaps(dn, g)
+  dn_hits_idx = queryHits(hits) # get index of de novos
+  hits_idx = subjectHits(hits) # get index of genes
+
+  de_novos = de_novos[dn_hits_idx,]
+  de_novos$gene = genes$gene[hits_idx]
+  
+  return(de_novos)
+}
+
 filter_with_bed <- function(de_novos, bed){
   # assumes that the bed input has at least three columns with chr, start, end as the first three (all others ignored)
 
