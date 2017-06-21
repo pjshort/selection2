@@ -5,7 +5,7 @@
 library(GenomicRanges)
 library(BSgenome.Hsapiens.UCSC.hg19)
 
-mut_rates <- read.table("./data/forSanger_1KG_mutation_rate_table.txt", header=TRUE)
+mut_rates <- read.table("../data/forSanger_1KG_mutation_rate_table.txt", header=TRUE)
 
 ### get the trinucleotide context
 
@@ -71,6 +71,14 @@ p_base <- function(from){
   return(sum(p))
 }
 
+p_from_to <- function(from, to){
+
+  # probability of mutation from base in position 2 to any of three other possible bases
+
+  p = mut_rates$mu_snp[(mut_rates$from == from) & (mut_rates$to == to)]
+  return(p)
+}
+
 p_position <- function(sequence, normalize = FALSE){
 
   # return vector length nchar(sequence) - 2 with probability of mutation at each base
@@ -96,6 +104,10 @@ p_sequence <- function(sequence){
 p_sequence_meth <- function(sequence, cpg_pos, prop_meth, correction_model) {
   # prop methylated is just a vector with one entry for each CpG in the sequence containing the proportion methylated as the vector entry
   p_seq_raw = sum(as.numeric(p_position(sequence)))
+  
+  if (length(cpg_pos) == 0) {
+    return(p_seq_raw)
+  }
   
   cpgs_ref = str_sub(sequence, cpg_pos - 1, cpg_pos + 1)
   cpgs_alt = cpgs_ref
