@@ -19,7 +19,8 @@ option_list <- list(
   make_option("--elements", help = "Pass elements in which DNMs fall"),
   make_option("--null_model", default = "../data/ddd_synonymous_lm.RData"),
   make_option("--output", help = "location to save data frame with windows stats"),
-  make_option("--pop_size", help="Size of the population (number of individuals). Used to calculate allele count cutoff for rare vars (<0.1%).")
+  make_option("--AC_column_name", default = "allele_count", help = "Name of column (if not allele_count) to be used (e.g. 'AC_NFE' for non-finnish european)"),
+  make_option("--pop_size", default=5034, help="Size of the population (number of individuals). Used to calculate allele count cutoff for rare vars (<0.1%).")
 )
 
 args <- parse_args(OptionParser(option_list=option_list))
@@ -39,7 +40,13 @@ if (any(!grepl("^chr", elements$chr))) {
 vars = read.table(args$vars, header = TRUE, sep = "\t")
 vars$chr = paste0("chr", vars$chr)
 vars = subset(vars, (nchar(as.character(vars$alt)) == 1) & (nchar(as.character(vars$ref)) == 1))
-vars = subset(vars, filter == 'PASS')
+#vars = subset(vars, filter == 'PASS')
+
+if (args$AC_column_name	!= "allele_count") {
+  vars = vars[, !(names(vars) == "allele_count")]
+  colnames(vars)[colnames(vars) == args$AC_column_name] = "allele_count"
+}
+
 
 print(args)
 load(args$null_model)
@@ -86,9 +93,6 @@ wgbs_split = split(wgbs, wgbs$region_id)
 cpg_positions = sapply(wgbs_split, function(df) c(df$pos - elements$start[elements$region_id == df$region_id[1]] + 1))
 prop_methylated = sapply(wgbs_split, function(df) c(df$prop_methylated))
 
-seqs = elements$seq[match(names(prop_methylated), elements$region_id)]
-seqs = split(seqs, f = names(prop_methylated))
-
 # get probability per element with cpg adjustment
 #load(methylation_correction_model.RData)
 methyl_df = read.table("~/scratch/CpG/methylation_effect_on_obs_exp.ESC.txt", header = TRUE, sep = "\t")
@@ -97,8 +101,18 @@ methylation_correction_model = lm(obs_exp_ratio ~ prop_methylated, methyl_df)
 
 print(methyl_df)
 
-elements = elements[match(names(prop_methylated), elements$region_id),]
-elements$p_snp_null = 2 * mapply(p_sequence_meth, seqs, cpg_positions, prop_methylated, MoreArgs = list("correction_model" = methylation_correction_model))  # takes sequence, sites that are cpgs, prop methylated at those sites
+seqs = elements$seq[match(names(prop_methylated), elements$region_id)]
+seqs = split(seqs, f = names(prop_methylated))
+
+# set the sequence mutability
+elements$p_snp_null = 2 * sapply(elements$seq, p_sequence)
+
+# correct those that have CpGs
+elements$p_snp_null[match(names(prop_methylated), elements$region_id)] = 2 * mapply(p_sequence_meth, seqs, cpg_positions, prop_methylated, MoreArgs = list("correction_model" = methylation_correction_model))  # takes sequence, sites that are cpgs, prop methylated at those sites
+
+#print(nrow(elements))
+#elements = elements[match(names(prop_methylated), elements$region_id),]
+#print(nrow(elements))
 
 # add expected per element
 elements$expected = predict(synonymous_lm, elements)
@@ -118,8 +132,10 @@ o = ddply(v, "region_id", function(df) data.frame(observed = sum(df$allele_count
 
 print(head(v))
 
-elements = subset(elements, region_id %in% o$region_id)
-elements$observed = o$observed[match(o$region_id, elements$region_id)]
+#elements = subset(elements, region_id %in% o$region_id)
+# get number of observed variants
+elements$observed = 0
+elements$observed[match(o$region_id, elements$region_id)] = o$observed[match(o$region_id, elements$region_id)]
 
 print(tail(elements[order(elements$observed),]))
 
