@@ -4,7 +4,6 @@ library(plyr)
 library(stringr)
 source("./mutation_null_model.R")
 source("./annotation_tools.R")
-source("../dddMAPS/MAPS.R")
 
 ### command line options
 option_list <- list(
@@ -12,7 +11,9 @@ option_list <- list(
   make_option("--genes", help="List of regions to assign variants to correct element. Should match MACB_expected input."),
   make_option("--gene_mutation_rates", help="Mutations rates calculated per gene"),
   make_option("--model_out", help="Output file for linear model (saved as RData object)"),
-  make_option("--pop_size", help="Size of the population (number of individuals). Used to calculate allele count cutoff for rare vars (<0.1%)."),
+  make_option("--genes_out", help="File to output name of genes with mutability and observed variants"),
+  make_option("--AC_column_name", default = "allele_count", help = "Name of column (if not allele_count) to be used (e.g. 'AC_NFE' for non-finnish european)"),
+  make_option("--pop_size", default=5034, help="Size of the population (number of individuals). Used to calculate allele count cutoff for rare vars (<0.1%). Default is set to 5034 (BRIDGE europeans)")
 )
 
 args <- parse_args(OptionParser(option_list=option_list))
@@ -20,7 +21,14 @@ args <- parse_args(OptionParser(option_list=option_list))
 print(args)
 
 variants = read.table(args$variants, header = TRUE, sep = "\t")
-variants = subset(variants, filter == "PASS")
+variants = subset(variants, (nchar(as.character(variants$alt)) == 1) & (nchar(as.character(variants$ref)) == 1))
+#variants = subset(variants, filter == "PASS")
+
+if (args$AC_column_name	!= "allele_count") {
+  variants = variants[, !(names(variants) == "allele_count")]
+  colnames(variants)[colnames(variants) == args$AC_column_name] = "allele_count"
+}
+
 
 genes = read.table(args$genes, header = TRUE, sep = "\t")
 genes = subset(genes, stop - start > 1)
@@ -64,3 +72,4 @@ synonymous_lm = lm(observed_rare_synonymous_count ~ p_snp_null, gene_synonymous_
 
 # fit linear model and save as RData object
 save(synonymous_lm, file = args$model_out)
+write.table(gene_synonymous_counts, file = args$genes_out, col.names = TRUE, row.names = FALSE, quote = FALSE, sep = "\t")
