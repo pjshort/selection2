@@ -40,7 +40,7 @@ if (any(!grepl("^chr", elements$chr))) {
 vars = read.table(args$vars, header = TRUE, sep = "\t")
 vars$chr = paste0("chr", vars$chr)
 vars = subset(vars, (nchar(as.character(vars$alt)) == 1) & (nchar(as.character(vars$ref)) == 1))
-#vars = subset(vars, filter == 'PASS')
+vars = subset(vars, filter == 'PASS')
 
 if (args$AC_column_name	!= "allele_count") {
   vars = vars[, !(names(vars) == "allele_count")]
@@ -95,7 +95,11 @@ prop_methylated = sapply(wgbs_split, function(df) c(df$prop_methylated))
 
 # get probability per element with cpg adjustment
 #load(methylation_correction_model.RData)
-methyl_df = read.table("~/scratch/CpG/methylation_effect_on_obs_exp.ESC.txt", header = TRUE, sep = "\t")
+# old version, fit to BRIDGE data
+#methyl_df = read.table("~/scratch/CpG/methylation_effect_on_obs_exp.ESC.txt", header = TRUE, sep = "\t")
+
+#new version, fit to gnomAD data
+methyl_df = read.table("~/scratch/CpG/data/methylation_effect_on_obs_exp.ESC_sperm_matched_sites.txt", header = TRUE, sep = "\t")
 methyl_df$prop_methylated = seq(0.025, 0.975, 0.05)
 methylation_correction_model = lm(obs_exp_ratio ~ prop_methylated, methyl_df)
 
@@ -106,6 +110,9 @@ seqs = split(seqs, f = names(prop_methylated))
 
 # set the sequence mutability
 elements$p_snp_null = 2 * sapply(elements$seq, p_sequence)
+
+# save the triplet p_snp_null
+elements$p_snp_null_no_methyl_correction = elements$p_snp_null
 
 # correct those that have CpGs
 elements$p_snp_null[match(names(prop_methylated), elements$region_id)] = 2 * mapply(p_sequence_meth, seqs, cpg_positions, prop_methylated, MoreArgs = list("correction_model" = methylation_correction_model))  # takes sequence, sites that are cpgs, prop methylated at those sites

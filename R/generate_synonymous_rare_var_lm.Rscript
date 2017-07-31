@@ -22,7 +22,7 @@ print(args)
 
 variants = read.table(args$variants, header = TRUE, sep = "\t")
 variants = subset(variants, (nchar(as.character(variants$alt)) == 1) & (nchar(as.character(variants$ref)) == 1))
-#variants = subset(variants, filter == "PASS")
+variants = subset(variants, filter == "PASS")
 
 if (args$AC_column_name	!= "allele_count") {
   variants = variants[, !(names(variants) == "allele_count")]

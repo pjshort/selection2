@@ -103,10 +103,11 @@ p_sequence <- function(sequence){
 
 p_sequence_meth <- function(sequence, cpg_pos, prop_meth, correction_model) {
   # prop methylated is just a vector with one entry for each CpG in the sequence containing the proportion methylated as the vector entry
-  p_seq_raw = sum(as.numeric(p_position(sequence)))
+  
+   p_snp_no_methyl_correction = sum(as.numeric(p_position(sequence)))
   
   if (length(cpg_pos) == 0) {
-    return(p_seq_raw)
+    return(p_snp_no_methyl_correction)
   }
   
   cpgs_ref = str_sub(sequence, cpg_pos - 1, cpg_pos + 1)
@@ -122,7 +123,7 @@ p_sequence_meth <- function(sequence, cpg_pos, prop_meth, correction_model) {
   mu_cpg$prop_methylated = prop_meth
   mu_cpg_corrected = mu_cpg$mu_snp * predict(correction_model, mu_cpg) # uses prop_methylated to return	scale (generally 0.2 to	1.2)
   
-  p_seq_adjusted = p_seq_raw + sum(mu_cpg_corrected) - sum(mu_cpg$mu_snp)  # take away unadjusted and add adjusted
+  p_seq_adjusted = p_snp_no_methyl_correction + sum(mu_cpg_corrected) - sum(mu_cpg$mu_snp)  # take away unadjusted and add adjusted
 
   return(p_seq_adjusted)
 }
