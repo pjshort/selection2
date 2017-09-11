@@ -1,0 +1,33 @@
+#!/bin/bash
+#SBATCH -J synonymous_models_BRIDGE_EUR
+#SBATCH -A WGS10K
+#SBATCH -p sandybridge
+#SBATCH -N 1
+#SBATCH --exclusive
+#SBATCH -t 01:00:00
+#SBATCH --requeue
+#SBATCH --mail-type=FAIL --mail-type=REQUEUE
+
+# Load modules
+. /etc/profile.d/modules.sh
+module purge
+module load default-impi
+# cbrc modules are here:
+export MODULEPATH=/scratch/cbrcmod/modules/out/modulefiles:$MODULEPATH
+module load samtools/1.2 parallel
+
+
+cd ~/software/selection2/R
+
+~/software/R-3.3.2/builddir/bin/Rscript generate_synonymous_null_lm.Rscript \
+--variants ~/scratch/gnomAD/synonymous_all_chrs.gnomAD.tsv \
+--exon_mutation_rates ~/software/selection2/data/all_exons_pmut_div_February07.gnomad_bridge_coverage_added.txt.gz \
+--synonymous_lm_out ../models/obs_exp_lm.gnomAD_NFE.40x_cov.RData \
+--maps_lm_out ../models/maps_lm.gnomAD_NFE.40x_cov.RData \
+--genes_out ../models/genes_synonymous.gnomAD_NFE.40x_cov.txt \
+--genes_coverage_summary_out ../models/genes_synonymous.gnomAD_NFE.all_exons_no_cov_cutoff.txt \
+--AC_column_name 'AC_NFE' \
+--pop_size 7509 \
+--mut_rates /home/pjs90/software/dddMAPS/data/forSanger_1KG_mutation_rate_table.txt \
+--coverage_minimum 40 \
+--coverage_column_name median_coverage_gnomad
