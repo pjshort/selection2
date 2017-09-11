@@ -1,0 +1,156 @@
+### dependencies
+library(optparse)
+library(plyr)
+library(stringr)
+library(BSgenome.Hsapiens.UCSC.hg19)
+source("./mutation_null_model.R")
+source("./annotation_tools.R")
+
+### command line options
+option_list <- list(
+  make_option("--variants", help="File with observed variants in the population."),
+  make_option("--exon_mutation_rates", help="Mutations rates calculated per exon from ExAC paper, via Kaitlin Samocha"),
+  make_option("--synonymous_lm_out", help="Output file for linear model (saved as RData object)"),
+  make_option("--maps_lm_out", help = "Output file for linear model used in mutability adjusted proportion of singletons (saved as RData object)"),
+  make_option("--genes_out", help="File to output name of genes with mutability and observed variants"),
+  make_option("--genes_coverage_summary_out", help = "file to show distribution of obs/exp at different coverage cutoffs"),
+  make_option("--AC_column_name", default = "allele_count", help = "Name of column (if not allele_count) to be used (e.g. 'AC_NFE' for non-finnish european)"),
+  make_option("--pop_size", default=5034, help="Size of the population (number of individuals). Used to calculate allele count cutoff for rare vars (<0.1%). Default is set to 5034 (BRIDGE europeans)"),
+  make_option("--mut_rates", default="/home/pjs90/software/dddMAPS/data/forSanger_1KG_mutation_rate_table.txt"),
+  make_option("--coverage_minimum", help="set minimum coverage for exons to fit synonymous model", default = 0),
+  make_option("--coverage_column_name", default = "median_coverage", help = "Name of column (if not median_coverage)") 
+)
+
+args <- parse_args(OptionParser(option_list=option_list))
+
+print(args)
+
+variants = read.table(args$variants, header = TRUE, sep = "\t")
+variants = subset(variants, (nchar(as.character(variants$alt)) == 1) & (nchar(as.character(variants$ref)) == 1))
+variants = subset(variants, filter == "PASS")
+
+if (args$AC_column_name	!= "allele_count") {
+  variants = variants[, !(names(variants) == "allele_count")]
+  colnames(variants)[colnames(variants) == args$AC_column_name] = "allele_count"
+}
+
+exons = read.table(gzfile(args$exon_mutation_rates), header = TRUE, sep = "\t")
+
+if (any(!grepl("^chr", exons$chr))) {
+  exons$chr = paste0("chr", exons$chr)
+}
+
+print("only analyzing the autosomes")
+exons =	subset(exons, chr != "chrX")
+
+
+# calculate the allele count cutoff for synonymous model
+rare_var_ac = args$pop_size*2*0.001  # multiply by two for no. of chroms and cutoff of 0.1%
+
+synonymous_coding = subset(variants, CQ == "synonymous_variant")
+synonymous_coding = filter_with_bed(synonymous_coding, exons[,c("chr", "start", "stop")])
+
+rare_synonymous_coding = subset(synonymous_coding, allele_count <= rare_var_ac)
+rare_synonymous_coding = subset(rare_synonymous_coding, allele_count > 0)  # to remove variants where observed in other population
+
+#args$coverage_minimum = as.numeric(args$coverage_minimum)
+if (args$coverage_minimum > 0) {
+  if (!(args$coverage_column_name %in% colnames(exons))) {
+    stop("Missing median coverage column: you specified a coverage minimum, but there is no 'median coverage' column in the exon file. Maybe it is just named 'coverage' or you forgot to add it?")
+  }
+  print(sprintf("Using coverage cutoff of %ix...", args$coverage_minimum))
+  all_exons = exons
+  exons = subset(exons, exons[,args$coverage_column_name] >= args$coverage_minimum)
+  print(sprintf("You put in %i exons and there were %i above the coverage cutoff...", nrow(all_exons), nrow(exons) ))
+}
+
+print(head(rare_synonymous_coding))
+
+# assign each synonymous DNM to a gene
+rare_synonymous_coding_well_covered = filter_with_bed(rare_synonymous_coding, exons)
+rare_synonymous_coding_well_covered = unique(get_gene(rare_synonymous_coding_well_covered, exons))
+
+print(head(exons))
+print(head(rare_synonymous_coding_well_covered))
+
+print("Assigning synonymous variants to genes...")
+
+
+gene_mutation_rates = ddply(exons, "gene", function(df) data.frame(p_snp_null = sum(df$p_syn)))
+#gene_mutaton_rates = exons
+
+# count the number of sites where rare variants are present 
+gene_synonymous_counts = ddply(rare_synonymous_coding_well_covered, .variables = c("gene"), .fun = function(df) data.frame(observed_rare_synonymous_count = nrow(df)))
+#gene_synonymous_counts = ddply(rare_synonymous_coding_well_covered, .variables = c("gene"), .fun = function(df) data.frame(observed_rare_synonymous_count = sum(df$allele_count)))
+
+gene_mutation_rates$observed_rare_synonymous_count = 0 
+gene_mutation_rates$observed_rare_synonymous_count[match(gene_synonymous_counts$gene, gene_mutation_rates$gene)] = gene_synonymous_counts$observed_rare_synonymous_count
+
+print("Fitting linear model to the synonymous counts as a function of mutation rate.")
+
+synonymous_lm = lm(observed_rare_synonymous_count ~ p_snp_null, gene_mutation_rates)
+
+# fit linear model and save as RData object
+save(synonymous_lm, file = args$synonymous_lm_out)
+
+gene_mutation_rates$expected = predict(synonymous_lm, gene_mutation_rates)
+write.table(gene_mutation_rates[,c("gene", "p_snp_null", "observed_rare_synonymous_count", "expected")], file = args$genes_out, col.names = TRUE, row.names = FALSE, quote = FALSE, sep = "\t")
+
+#uncomment to generate obs/exp for all of the exons
+#all_exons$coverage_bin = cut(all_exons[,args$coverage_column_name], c(seq(0,60,5), 100))
+#rare_synonymous_coding = get_region_id_multi_overlap(rare_synonymous_coding, all_exons)
+#all_exon_counts = ddply(rare_synonymous_coding, .variables = c("region_id"), .fun = function(df) data.frame(observed_rare_synonymous_count = nrow(df)))
+#all_exons$observed = 0
+#all_exons$observed[match(all_exon_counts$region_id, all_exons$region_id)] = all_exon_counts$observed_rare_synonymous_count
+#all_exons$p_snp_null = all_exons$p_syn
+#all_exons$expected = predict(synonymous_lm, all_exons)
+#write.table(all_exons, file = args$exons_out, col.names = TRUE, row.names = FALSE, quote = FALSE, sep = "\t")
+
+# stratify by coverage
+gene_mutation_rates = ddply(all_exons, "gene", function(df) data.frame(p_snp_null = sum(df$p_syn), coverage = weighted.mean(df[,args$coverage_column_name], df$bp)))
+colnames(gene_mutation_rates)[colnames(gene_mutation_rates) == 'coverage'] = args$coverage_column_name
+
+rare_synonymous_coding_all_exons = filter_with_bed(rare_synonymous_coding, all_exons)
+rare_synonymous_coding_all_exons = unique(get_gene(rare_synonymous_coding_all_exons, all_exons))
+
+# count the number of sites where rare variants are present 
+gene_synonymous_counts = ddply(rare_synonymous_coding_all_exons, .variables = c("gene"), .fun = function(df) data.frame(observed_rare_synonymous_count = nrow(df)))
+
+gene_mutation_rates$observed_rare_synonymous_count = 0 
+gene_mutation_rates$observed_rare_synonymous_count[match(gene_synonymous_counts$gene, gene_mutation_rates$gene)] = gene_synonymous_counts$observed_rare_synonymous_count
+
+gene_mutation_rates$expected = predict(synonymous_lm, gene_mutation_rates)
+write.table(gene_mutation_rates[,c("gene", "p_snp_null", "observed_rare_synonymous_count", "expected", args$coverage_column_name)], file = args$genes_coverage_summary_out, col.names = TRUE, row.names = FALSE, quote = FALSE, sep = "\t")
+
+
+# fit maps model and save as RData object
+
+# synonymous vars should have chr, pos, ref, alt, allele_count
+# mu snps is three columns: from, to, mu_snp
+
+mu_snp = read.delim(args$mut_rates)
+  
+if (!("context" %in% colnames(rare_synonymous_coding))){
+  # retrieve context info
+  print("Getting tri-nucleotide context for each synonymous variant.")
+  
+  if (!(any(grepl("chr", rare_synonymous_coding$chr)))) {
+   rare_synonymous_coding$chr = paste0("chr", rare_synonymous_coding$chr)
+  }
+   
+  rare_synonymous_coding$context = as.character(getSeq(Hsapiens, as.character(rare_synonymous_coding$chr), rare_synonymous_coding$pos - 1, rare_synonymous_coding$pos+1))
+}
+
+if (!("alt_context" %in% colnames(rare_synonymous_coding))){
+  rare_synonymous_coding$alt_context = rare_synonymous_coding$context
+  str_sub(rare_synonymous_coding$alt_context, 2, 2) <- rare_synonymous_coding$alt  # replace with alt
+}
+
+print("Merging the synonymous variants by tri-nucleotide context.")
+synonymous_tri = ddply(rare_synonymous_coding, c('context', 'alt_context', 'ref', 'alt'), function(x) { data.frame(n=nrow(x), singletons=sum(x$allele_count == 1), doubletons=sum(x$allele_count == 2), tripletons=sum(x$allele_count == 3), quad=sum(x$allele_count == 4), quint=sum(x$allele_count == 5), ac_gt_five=sum(x$allele_count > 5), ac_lt_five=sum(x$allele_count < 5), rare_var=sum(x$allele_count < 16))})
+
+synonymous_tri = merge(synonymous_tri, mu_snp, by.x = c("context", "alt_context"), by.y = c("from", "to"))
+
+maps_lm = lm(singletons/n ~ mu_snp, synonymous_tri, weights = synonymous_tri$n)
+
+save(maps_lm, file = args$maps_lm_out)
