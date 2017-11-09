@@ -1,9 +1,14 @@
 # selection2
 
 # Requirements and Data
-R version 3.2.2 or higher is recommended, and only the GenomicRanges packages is required.
+R version 3.2.2 or higher is recommended. Install the following packages:
 
 `install.packages("GenomicRanges")`
+`install.packages("plyr")`
+`install.packages("optparse")`
+
+`source("https://bioconductor.org/biocLite.R")`
+`biocLite("BSgenome.Hsapiens.UCSC.hg19")`
 
 A file with tri-nucleotide mutation rates from Samocha et. al, 2014 and whole genome bisulfite sequencing data from embryonic stem cells and sperm is in the `/data` folder. 
 
@@ -16,21 +21,18 @@ Any set of elements and variants in hg19 coordinates can be used. The elements a
 
 First, the synonymous variants should be used to generate a model to predict the number of rare variants with MAF < 0.1% for a given sequence based on its mutability.
 
-The example provided, `synonymous_model_BRIDGE.sh` uses synonymous sites from deep whole genomes from 5,034 individuals in the BRIDGE cohort.
+The following slurm jobs will generate these files for BRIDGE, gnomad (requires some pre-processing to get the synonymous variants from these studies):
 
-`Rscript generate_synonymous_rare_var_lm.Rscript \
---variants /path/to/variants --genes /path/to/genes/or/exons \
---gene_mutation_rates /path/to/mutation/rate/per/gene \
---model_out /path/to/output --pop_size pop_size`
+`fit_synonymous_models_BRIDGE_slurm`
+`fit_synonymous_models_gnomAD_slurm`
 
-Next, this model can be used to run the `selection2.R` script which takes the following command line arguments:
+Next, these models can be used to run `selection2.scalable.R` which uses a config file designed to make it easier to scale the number of deep WGS used to meta-analyze.
 
-`Rscript selection2.R \
---vars /path/to/variants \
+`Rscript selection2.scalable.R \
+--config_file /path/to/config
 --elements /path/to/elements \
---null_model /path/to/model/from/above \
+--chromosome <number>
 --output /path/to/output \
---pop_size pop_size
 `
 
-This script was written to be easily parallelized, for instance in slurm by running 22 separate jobs (one for each chromosome) with a different set of input variants. The set of elements can be kept the same and the script will only generate a score for those for which there are variants included in the input. For instance, if you only pass the chromosome 1 variants, obs/exp ratio and Z-score will only be generated for elements on chromosome 1.
+An example can be found in selection2_FLAGSHIP
