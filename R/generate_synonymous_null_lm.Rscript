@@ -68,23 +68,14 @@ print(head(rare_synonymous_coding))
 
 # assign each synonymous DNM to a gene
 rare_synonymous_coding_well_covered = filter_with_bed(rare_synonymous_coding, exons)
-rare_synonymous_coding_well_covered = unique(get_gene(rare_synonymous_coding_well_covered, exons))
+rare_synonymous_coding_well_covered = get_region_id_multi_overlap(rare_synonymous_coding_well_covered, exons)
 
-print(head(exons))
-print(head(rare_synonymous_coding_well_covered))
+exon_synonymous_counts = ddply(rare_synonymous_coding_well_covered, .variables = c("region_id"), .fun = function(df) data.frame(observed_rare_synonymous_count = nrow(df)))
+exons$observed_rare_synonymous_count = 0
+exons$observed_rare_synonymous_count[match(exon_synonymous_counts$region_id, exons$region_id)] = exon_synonymous_counts$observed_rare_synonymous_count
+exons = subset(exons, observed_rare_synonymous_count > 0)  # there are many exons with 0 counts of synonymous sites due to annotation issues - remove these
 
-print("Assigning synonymous variants to genes...")
-
-
-gene_mutation_rates = ddply(exons, "gene", function(df) data.frame(p_snp_null = sum(df$p_syn)))
-#gene_mutaton_rates = exons
-
-# count the number of sites where rare variants are present 
-gene_synonymous_counts = ddply(rare_synonymous_coding_well_covered, .variables = c("gene"), .fun = function(df) data.frame(observed_rare_synonymous_count = nrow(df)))
-#gene_synonymous_counts = ddply(rare_synonymous_coding_well_covered, .variables = c("gene"), .fun = function(df) data.frame(observed_rare_synonymous_count = sum(df$allele_count)))
-
-gene_mutation_rates$observed_rare_synonymous_count = 0 
-gene_mutation_rates$observed_rare_synonymous_count[match(gene_synonymous_counts$gene, gene_mutation_rates$gene)] = gene_synonymous_counts$observed_rare_synonymous_count
+gene_mutation_rates = ddply(exons, "gene", function(df) data.frame(p_snp_null = sum(df$p_syn), observed_rare_synonymous_count = sum(df$observed_rare_synonymous_count)))
 
 print("Fitting linear model to the synonymous counts as a function of mutation rate.")
 
