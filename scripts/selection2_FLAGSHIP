@@ -1,0 +1,28 @@
+#!/bin/bash
+#SBATCH -J selection_test_flagship
+#SBATCH -A WGS10K
+#SBATCH -p sandybridge
+#SBATCH -N 1
+#SBATCH --exclusive
+#SBATCH -t 24:00:00
+#SBATCH --requeue
+#SBATCH --mail-type=FAIL --mail-type=REQUEUE
+
+# Load modules
+. /etc/profile.d/modules.sh
+module purge
+module load default-impi
+# cbrc modules are here:
+export MODULEPATH=/scratch/cbrcmod/modules/out/modulefiles:$MODULEPATH
+module load samtools/1.2 parallel
+
+#ulimit -Sn unlimited
+
+# get selection test scores for the HARS and conserved elements
+cd ~/software/selection2/R
+
+~/software/R-3.3.2/builddir/bin/Rscript selection2.scalable.R \
+--config_file ~/software/selection2/R/gnomad_BRIDGE_config.R \
+--chromosome ${SLURM_ARRAY_TASK_ID} \
+--elements ~/scratch/FLAGSHIP/FLAGSHIP_BRIDGE_coverage.2017.11.3.tsv \
+--output ~/scratch/FLAGSHIP/selection_test/chr${SLURM_ARRAY_TASK_ID}_flagship_elements.BRIDGE.txt
