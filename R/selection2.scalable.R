@@ -15,7 +15,10 @@ option_list <- list(
   make_option("--elements", help = "Elements to generate constraint scores for."),
   make_option("--chromosome", help = "Chromosome to use (for running in parallel)"),
   make_option("--config_file", help = "File that describes the list of studies to use. Name of the study will be used to name columns."),
-  make_option("--output", help = "where to save the elements annotated with obs/exp and z scores")
+  make_option("--output", help = "where to save the elements annotated with obs/exp and z scores"),
+  make_option("--add_coverage_flags", default=F, action='store_true', help = "if coverage is included, add flags to indicate whether it is well-covered in all of the studies"),
+  make_option("--bed_file", default=F, action='store_true', help = "use this option if elements is bed file. assumes first three columns are chr, start, stop"),
+  make_option("--rds_file", default=F, action='store_true', help = "use this option if elements is an RDS file - used in BRIDGE regulome project")
 )
 
 args <- parse_args(OptionParser(option_list=option_list))
@@ -23,10 +26,19 @@ args <- parse_args(OptionParser(option_list=option_list))
 source(args$config_file)
 
 # load in regions file with required columns: chr, start, stop
-if (summary( file(args$elements) )$class == "gzfile") {
-  elements <- read.table(gzfile(args$elements), sep = "\t", header = TRUE, stringsAsFactors = FALSE)
+if (args$bed_file) {
+  elements <- read.table(args$elements, sep = "\t", header = FALSE, stringsAsFactors = FALSE)
+  colnames(elements)[1:3] = c("chr", "start", "stop")
+} else if (args$rds_file) {
+  elements <- readRDS(args$elements)
 } else {
-  elements <- read.table(args$elements, sep = "\t", header = TRUE, stringsAsFactors = FALSE)
+  if (summary( file(args$elements) )$class == "gzfile") {
+    elements <- read.table(gzfile(args$elements), sep = "\t", header = TRUE, stringsAsFactors = FALSE)
+  } else if (summary( file(args$elements) )$class == "RDS") {
+    elements <- readRDS(args$elements)
+  } else {
+    elements <- read.table(args$elements, sep = "\t", header = TRUE, stringsAsFactors = FALSE)
+  }
 }
 
 # make all of the in the form chr1, chr2, etc.
@@ -35,10 +47,13 @@ if (any(!grepl("^chr", elements$chr))) {
 }
 
 if (!(grepl("chr", args$chromosome))) {
-  print("--chromosome did not have chr in front of it, assuming this is what you want!")
   elements = subset(elements, chr %in% paste0("chr", args$chromosome))
 } else {
   elements = subset(elements, chr %in% args$chromosome)
+}
+
+if (nrow(elements) == 0){
+  stop("Did not find any elements after filtering by chromosome.")
 }
 
 # add region id
@@ -59,7 +74,7 @@ elements$phastcons100 = scores(phastCons100way.UCSC.hg19, element_intervals)
 # add the base mutation rate
 # for each element, need to pick out the sites that are CpGs and retrieve the prop methylated
 # load in ESC WGBS data
-wgbs = read.table("~/scratch/CpG/data/E008_WGBS_FractionalMethylation.bedGraph", header = FALSE, sep = "\t")
+wgbs = read.table(gzfile("~/scratch/CpG/data/E008_WGBS_FractionalMethylation.bedGraph.gz"), header = FALSE, sep = "\t")
 colnames(wgbs) = c("chr", "start", "stop", "prop_methylated")
 wgbs$pos = wgbs$start + 1
 wgbs = wgbs[,c("chr", "pos", "prop_methylated")]
@@ -97,10 +112,10 @@ seqs = split(seqs, f = names(prop_methylated))
 elements$p_snp_null = sapply(elements$seq, p_sequence)
 
 # save the triplet p_snp_null
-elements$p_snp_null_no_methyl_correction = elements$p_snp_null
+#elements$p_snp_null_no_methyl_correction = elements$p_snp_null
 
 # correct based on CpGs methylation
-elements$p_snp_null[match(names(prop_methylated), elements$region_id)] = mapply(p_sequence_meth, seqs, cpg_positions, prop_methylated, MoreArgs = list("correction_model" = methylation_correction_model))  # takes sequence, sites that are cpgs, prop methylated at those sites
+#elements$p_snp_null[match(names(prop_methylated), elements$region_id)] = mapply(p_sequence_meth, seqs, cpg_positions, prop_methylated, MoreArgs = list("correction_model" = methylation_correction_model))  # takes sequence, sites that are cpgs, prop methylated at those sites
 
 print(head(elements))
 
@@ -121,7 +136,7 @@ for (study in studies) {
   }
   
   vars = subset(vars, (nchar(as.character(vars$alt)) == 1) & (nchar(as.character(vars$ref)) == 1))
-  vars = subset(vars, filter == 'PASS')
+  #vars = subset(vars, filter == 'PASS')
   
   print(head(vars))
 
@@ -131,14 +146,20 @@ for (study in studies) {
   print(head(vars))
   mask = (v[,study$AC_column_name] < study$pop_size*2*0.001) & (v[,study$AC_column_name] > 0)
   v = subset(v, mask)
+  print('vars post allele count filter')
+  print(head(v))
 
   v = get_region_id_multi_overlap(v, elements)
-  o = ddply(v, "region_id", function(df) data.frame(observed = nrow(df)))
+  o = ddply(v, "region_id", function(df) data.frame(observed = sum(df$filter == 'PASS'), observed_low_qual = sum(df$filter != 'PASS')))
 
   #elements = subset(elements, region_id %in% o$region_id)
   # get number of observed variants
   elements$observed = 0
   elements$observed[match(o$region_id, elements$region_id)] = o$observed
+  
+  # this will be used later to flag elements with many low quality variant calls
+  elements$observed_low_qual = 0
+  elements$observed_low_qual[match(o$region_id, elements$region_id)] = o$observed_low_qual
 
   # add observed/expected
   elements$obs_exp_ratio = elements$observed/elements$expected
@@ -168,12 +189,22 @@ for (study in studies) {
   colnames(elements)[!(colnames(elements) %in% starting_cols)] = paste0(colnames(elements)[!(colnames(elements) %in% starting_cols)], "_", study$study_name)
 }
 
-
 # now, produce meta obs/exp
 elements$meta_observed = rowSums(elements[,grepl("observed", colnames(elements))])
 elements$meta_expected = rowSums(elements[,grepl("expected", colnames(elements))])
 elements$meta_obs_exp_ratio = elements$meta_observed/elements$meta_expected
 elements$meta_z_score = var_Z_score(elements$meta_observed, elements$meta_expected)
+
+
+if (args$add_coverage_flags) {
+  elements$filter = "PASS"
+  for (study in studies) {
+    cov = elements[,colnames(elements) %in% paste0("median_coverage_", study$study_name)]
+    elements$filter[cov < 20 & !(elements$filter == "PASS")] = paste0(elements$filter, ";", paste0("low_coverage_", study$study_name))
+    elements$filter[cov < 20 & (elements$filter == "PASS")] = paste0("low_coverage_", study$study_name)
+  }
+} 
+
 
 # output annotated elements
 write.table(elements, file = args$output, col.names = TRUE, sep = "\t", row.names = FALSE, quote = FALSE)
