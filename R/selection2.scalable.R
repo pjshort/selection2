@@ -119,6 +119,8 @@ elements$p_snp_null = sapply(elements$seq, p_sequence)
 
 print(head(elements))
 
+elements$filter = "PASS"
+
 for (study in studies) {
   print(study)
   starting_cols = colnames(elements)  
@@ -164,6 +166,10 @@ for (study in studies) {
   # add observed/expected
   elements$obs_exp_ratio = elements$observed/elements$expected
 
+  elements$low_qual_prop = f$observed_low_qual/(f$observed_low_qual + f$observed)
+  elements$filter[elements$low_qual_prop > 0.5 & !(elements$filter == "PASS")] = paste0(elements$filter, ";", "low_quality_0.5_", study$study_name)[elements$low_qual_prop > 0.5 & !(elements$filter == "PASS")]
+  elements$filter[elements$low_qual_prop > 0.5 & !(elements$filter == "PASS")] = paste0("low_quality_0.5_", study$study_name)  
+
   # calculate Z score from observed and expected
   var_Z_score = function(observed, expected){
     Xsq_vals = (observed- expected)^2/expected
@@ -208,7 +214,6 @@ if (args$coverage_correction) {
   elements$meta_obs_exp_ratio_cov_corrected = (elements$observed_gnomad + elements$observed_BRIDGE)/elements$meta_expected_cov_corrected
   elements$meta_z_score_cov_corrected = sqrt(((elements$observed_gnomad + elements$observed_BRIDGE) - elements$meta_expected_cov_corrected)^2/elements$meta_expected_cov_corrected)
 
-  elements$filter = "PASS"
   for (study in studies) {
     cov = elements[,colnames(elements) %in% paste0("median_coverage_", study$study_name)]
     cov[is.na(cov)] = 0  # replace missing coverage with 0
