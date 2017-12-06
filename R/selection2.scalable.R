@@ -12,11 +12,11 @@ source('./mutation_null_model.R')
 library(BSgenome.Hsapiens.UCSC.hg19)
 
 option_list <- list(
-  make_option("--elements", help = "Elements to generate constraint scores for."),
+  make_option("--elements", help = "Elements to annotate with constraint scores - expects 1-based coordinates."),
   make_option("--chromosome", help = "Chromosome to use (for running in parallel)"),
   make_option("--config_file", help = "File that describes the list of studies to use. Name of the study will be used to name columns."),
   make_option("--output", help = "where to save the elements annotated with obs/exp and z scores"),
-  make_option("--add_coverage_flags", default=F, action='store_true', help = "if coverage is included, add flags to indicate whether it is well-covered in all of the studies"),
+  make_option("--coverage_correction", default=F, action='store_true', help = "use coverage correction models (in config file) to make coverage correction to observed variants"),
   make_option("--bed_file", default=F, action='store_true', help = "use this option if elements is bed file. assumes first three columns are chr, start, stop"),
   make_option("--rds_file", default=F, action='store_true', help = "use this option if elements is an RDS file - used in BRIDGE regulome project")
 )
@@ -28,7 +28,7 @@ source(args$config_file)
 # load in regions file with required columns: chr, start, stop
 if (args$bed_file) {
   elements <- read.table(args$elements, sep = "\t", header = FALSE, stringsAsFactors = FALSE)
-  colnames(elements)[1:3] = c("chr", "start", "stop")
+  colnames(elements)[1:3] = c("chr", "start", "end")
 } else if (args$rds_file) {
   elements <- readRDS(args$elements)
 } else {
@@ -37,7 +37,7 @@ if (args$bed_file) {
   } else if (summary( file(args$elements) )$class == "RDS") {
     elements <- readRDS(args$elements)
   } else {
-    elements <- read.table(args$elements, sep = "\t", header = TRUE, stringsAsFactors = FALSE)
+    elements <- read.delim(args$elements)
   }
 }
 
@@ -58,17 +58,17 @@ if (nrow(elements) == 0){
 
 # add region id
 if (!("region_id" %in% colnames(elements))) {
-  elements$region_id = paste0(elements$chr, ":", elements$start, "-", elements$stop)
+  elements$region_id = paste0(elements$chr, ":", elements$start, "-", elements$end)
 }
 
 # get sequence context - some sequences will have N in them - we will have to give mutation rate of NA
 if (!("seq" %in% colnames(elements))) {
-  elements$seq = as.character(getSeq(Hsapiens, elements$chr, elements$start, elements$stop))
+  elements$seq = as.character(getSeq(Hsapiens, elements$chr, elements$start-1, elements$end+2))
 }
 
 # add phastcons100 score
 library(phastCons100way.UCSC.hg19)
-element_intervals = GRanges(seqnames=elements$chr, IRanges(start = elements$start, width = elements$stop - elements$start + 1))
+element_intervals = GRanges(seqnames=elements$chr, IRanges(start = elements$start, width = elements$end - elements$start + 1))
 elements$phastcons100 = scores(phastCons100way.UCSC.hg19, element_intervals)
 
 # add the base mutation rate
@@ -184,26 +184,38 @@ for (study in studies) {
 
   # add Z score
   elements$z_score = var_Z_score(elements$observed, elements$expected)
-  
+
   # rename all of the columns using study name
   colnames(elements)[!(colnames(elements) %in% starting_cols)] = paste0(colnames(elements)[!(colnames(elements) %in% starting_cols)], "_", study$study_name)
 }
 
 # now, produce meta obs/exp
-elements$meta_observed = rowSums(elements[,grepl("observed", colnames(elements))])
+elements$meta_observed = rowSums(elements[,grepl("observed", colnames(elements)) & !grepl("low_qual", colnames(elements))])
 elements$meta_expected = rowSums(elements[,grepl("expected", colnames(elements))])
 elements$meta_obs_exp_ratio = elements$meta_observed/elements$meta_expected
 elements$meta_z_score = var_Z_score(elements$meta_observed, elements$meta_expected)
 
+if (args$coverage_correction) {
+  load(studies$gnomad$gnomad_cov_correction)
+  load(studies$BRIDGE$bridge_cov_correction)
+  elements$expected_BRIDGE_cov_corrected = elements$expected_BRIDGE * predict(bridge_cov_correction_loess, elements)
+  elements$obs_exp_ratio_BRIDGE_cov_corrected = elements$observed_BRIDGE/elements$expected_BRIDGE_cov_corrected
 
-if (args$add_coverage_flags) {
+  elements$expected_gnomad_cov_corrected = elements$expected_gnomad * predict(gnomad_cov_correction_loess, elements)
+  elements$obs_exp_ratio_gnomad_cov_corrected = elements$observed_gnomad/elements$expected_gnomad_cov_corrected
+
+  elements$meta_expected_cov_corrected = (elements$expected_gnomad_cov_corrected + elements$expected_BRIDGE_cov_corrected)
+  elements$meta_obs_exp_ratio_cov_corrected = (elements$observed_gnomad + elements$observed_BRIDGE)/elements$meta_expected_cov_corrected
+  elements$meta_z_score_cov_corrected = sqrt(((elements$observed_gnomad + elements$observed_BRIDGE) - elements$meta_expected_cov_corrected)^2/elements$meta_expected_cov_corrected)
+
   elements$filter = "PASS"
   for (study in studies) {
     cov = elements[,colnames(elements) %in% paste0("median_coverage_", study$study_name)]
-    elements$filter[cov < 20 & !(elements$filter == "PASS")] = paste0(elements$filter, ";", paste0("low_coverage_", study$study_name))
+    cov[is.na(cov)] = 0  # replace missing coverage with 0
+    elements$filter[cov < 20 & !(elements$filter == "PASS")] = paste0(elements$filter, ";", "low_coverage_", study$study_name)[cov < 20 & !(elements$filter == "PASS")]
     elements$filter[cov < 20 & (elements$filter == "PASS")] = paste0("low_coverage_", study$study_name)
   }
-} 
+}
 
 
 # output annotated elements
