@@ -34,8 +34,6 @@ if (args$bed_file) {
 } else {
   if (summary( file(args$elements) )$class == "gzfile") {
     elements <- read.table(gzfile(args$elements), sep = "\t", header = TRUE, stringsAsFactors = FALSE)
-  } else if (summary( file(args$elements) )$class == "RDS") {
-    elements <- readRDS(args$elements)
   } else {
     elements <- read.delim(args$elements)
   }
@@ -52,6 +50,7 @@ if (!(grepl("chr", args$chromosome))) {
   elements = subset(elements, chr %in% args$chromosome)
 }
 
+
 if (nrow(elements) == 0){
   stop("Did not find any elements after filtering by chromosome.")
 }
@@ -61,9 +60,12 @@ if (!("region_id" %in% colnames(elements))) {
   elements$region_id = paste0(elements$chr, ":", elements$start, "-", elements$end)
 }
 
+print("Elements passed:")
+print(head(elements))
+
 # get sequence context - some sequences will have N in them - we will have to give mutation rate of NA
 if (!("seq" %in% colnames(elements))) {
-  elements$seq = as.character(getSeq(Hsapiens, elements$chr, elements$start-1, elements$end+2))
+  elements$seq = as.character(getSeq(Hsapiens, elements$chr, elements$start-1, elements$end+1))
 }
 
 # add phastcons100 score
@@ -112,10 +114,10 @@ seqs = split(seqs, f = names(prop_methylated))
 elements$p_snp_null = sapply(elements$seq, p_sequence)
 
 # save the triplet p_snp_null
-#elements$p_snp_null_no_methyl_correction = elements$p_snp_null
+elements$p_snp_null_no_methyl_correction = elements$p_snp_null
 
 # correct based on CpGs methylation
-#elements$p_snp_null[match(names(prop_methylated), elements$region_id)] = mapply(p_sequence_meth, seqs, cpg_positions, prop_methylated, MoreArgs = list("correction_model" = methylation_correction_model))  # takes sequence, sites that are cpgs, prop methylated at those sites
+elements$p_snp_null[match(names(prop_methylated), elements$region_id)] = mapply(p_sequence_meth, seqs, cpg_positions, prop_methylated, MoreArgs = list("correction_model" = methylation_correction_model))  # takes sequence, sites that are cpgs, prop methylated at those sites
 
 print(head(elements))
 
@@ -138,7 +140,6 @@ for (study in studies) {
   }
   
   vars = subset(vars, (nchar(as.character(vars$alt)) == 1) & (nchar(as.character(vars$ref)) == 1))
-  #vars = subset(vars, filter == 'PASS')
   
   print(head(vars))
 
@@ -152,7 +153,7 @@ for (study in studies) {
   print(head(v))
 
   v = get_region_id_multi_overlap(v, elements)
-  o = ddply(v, "region_id", function(df) data.frame(observed = sum(df$filter == 'PASS'), observed_low_qual = sum(df$filter != 'PASS')))
+  o = ddply(v, "region_id", function(df) data.frame(observed = sum(df$filter %in% study$pass_flags), observed_low_qual = sum(!(df$filter %in% study$pass_flags))))
 
   #elements = subset(elements, region_id %in% o$region_id)
   # get number of observed variants
@@ -166,7 +167,7 @@ for (study in studies) {
   # add observed/expected
   elements$obs_exp_ratio = elements$observed/elements$expected
 
-  elements$low_qual_prop = f$observed_low_qual/(f$observed_low_qual + f$observed)
+  elements$low_qual_prop = elements$observed_low_qual/(elements$observed_low_qual + elements$observed)
   elements$filter[elements$low_qual_prop > 0.5 & !(elements$filter == "PASS")] = paste0(elements$filter, ";", "low_quality_0.5_", study$study_name)[elements$low_qual_prop > 0.5 & !(elements$filter == "PASS")]
   elements$filter[elements$low_qual_prop > 0.5 & !(elements$filter == "PASS")] = paste0("low_quality_0.5_", study$study_name)  
 
@@ -194,6 +195,9 @@ for (study in studies) {
   # rename all of the columns using study name
   colnames(elements)[!(colnames(elements) %in% starting_cols)] = paste0(colnames(elements)[!(colnames(elements) %in% starting_cols)], "_", study$study_name)
 }
+
+print("Elements after adding variant counts and expected:")
+print(head(elements))
 
 # now, produce meta obs/exp
 elements$meta_observed = rowSums(elements[,grepl("observed", colnames(elements)) & !grepl("low_qual", colnames(elements))])
