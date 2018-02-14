@@ -73,6 +73,8 @@ library(phastCons100way.UCSC.hg19)
 element_intervals = GRanges(seqnames=elements$chr, IRanges(start = elements$start, width = elements$end - elements$start + 1))
 elements$phastcons100 = scores(phastCons100way.UCSC.hg19, element_intervals)
 
+print(sprintf("Finished annotating with sequence and phastcons score at %s", Sys.time()))
+
 # add the base mutation rate
 # for each element, need to pick out the sites that are CpGs and retrieve the prop methylated
 # load in ESC WGBS data
@@ -91,8 +93,10 @@ wgbs = get_region_id_multi_overlap(wgbs, elements)
 
 print(head(wgbs))
 
+wgbs$element_start = elements$start[match(wgbs$region_id, elements$region_id)]
+
 wgbs_split = split(wgbs, wgbs$region_id)
-cpg_positions = sapply(wgbs_split, function(df) c(df$pos - elements$start[elements$region_id == df$region_id[1]] + 1))
+cpg_positions = sapply(wgbs_split, function(df) c(df$pos - df$element_start + 1))
 prop_methylated = sapply(wgbs_split, function(df) c(df$prop_methylated))
 
 # get probability per element with cpg adjustment
@@ -101,7 +105,8 @@ prop_methylated = sapply(wgbs_split, function(df) c(df$prop_methylated))
 #methyl_df = read.table("~/scratch/CpG/methylation_effect_on_obs_exp.ESC.txt", header = TRUE, sep = "\t")
 
 #new version, fit to gnomAD data
-methyl_df = read.table("/home/pjs90/scratch/CpG/methylation_effect_on_obs_exp.ESC_sperm_matched.txt", header = TRUE, sep = "\t")
+#methyl_df = read.table("/home/pjs90/scratch/CpG/methylation_effect_on_obs_exp.ESC_sperm_matched.txt", header = TRUE, sep = "\t")
+methyl_df = read.table("/home/pjs90/scratch/CpG/data/methylation_effect_on_obs_exp.ESC.DNM_direct.txt", header = T, sep = "\t")
 methyl_df$prop_methylated = seq(0.025, 0.975, 0.05)
 methylation_correction_model = lm(obs_exp_ratio ~ prop_methylated, methyl_df)
 
@@ -109,6 +114,8 @@ print(methyl_df)
 
 seqs = elements$seq[match(names(prop_methylated), elements$region_id)]
 seqs = split(seqs, f = names(prop_methylated))
+
+print(sprintf("Calculating mutability for each element - this is the longest step... started at %s", Sys.time()))
 
 # set the sequence mutability
 elements$p_snp_null = sapply(elements$seq, p_sequence)
@@ -122,6 +129,8 @@ elements$p_snp_null[match(names(prop_methylated), elements$region_id)] = mapply(
 print(head(elements))
 
 elements$filter = "PASS"
+
+print(sprintf("Annotating elements with variant counts from each of the studies in the config file, started at %s", Sys.time()))
 
 for (study in studies) {
   print(study)
@@ -196,7 +205,7 @@ for (study in studies) {
   colnames(elements)[!(colnames(elements) %in% starting_cols)] = paste0(colnames(elements)[!(colnames(elements) %in% starting_cols)], "_", study$study_name)
 }
 
-print("Elements after adding variant counts and expected:")
+print(sprintf("Finished annotating elements with variant counts at %s", Sys.time()))
 print(head(elements))
 
 # now, produce meta obs/exp
